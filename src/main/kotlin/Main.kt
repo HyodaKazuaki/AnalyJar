@@ -118,7 +118,7 @@ class Main {
                     addLogger(Slf4jSqlDebugLogger)
                     val fileId = File.insert {
                         it[name] = file.fileName.toString()
-                        it[path] = file.pathString
+                        it[path] = file.fileName.toString()
                     } get File.id
 
                     val dependenceJar =
