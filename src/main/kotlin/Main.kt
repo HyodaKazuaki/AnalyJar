@@ -21,188 +21,209 @@ import java.util.jar.JarFile
 import kotlin.io.path.*
 import kotlin.system.exitProcess
 
-fun findNodeFromFileName(nodes: List<Node>, fileName: String): Node? {
-    return nodes.find { "${it.artifactId}-${it.version}.jar" == fileName } ?: run {
-        val childNodes = nodes.map {
-            println("${it.artifactId} -> ${it.childNodes}")
-            it.childNodes
-        }.flatten()
-        println(childNodes)
-        if (childNodes.isEmpty()) return null
-        return findNodeFromFileName(childNodes, fileName)
-    }
-}
+class Main {
+    companion object : Logging {
+        private val logger = logger()
 
-fun getArtifactInformation(nodes: List<Node>, fileName: String): Dependency? {
-    val node = findNodeFromFileName(nodes, fileName)
-    if (node != null) {
-        val dependency = Dependency()
-        dependency.groupId = node.groupId
-        dependency.artifactId = node.artifactId
-        dependency.version = node.version
-        return dependency
-    }
-    return null
-}
+        @JvmStatic
+        fun main(args: Array<String>) {
+            val argParser = ArgParser("AnalyJar")
+            val pomPath by argParser.argument(ArgType.String, description = "Pom file path")
+            val dbHost by argParser.option(ArgType.String, description = "Database host address").default("localhost")
+            val dbPort by argParser.option(ArgType.Int, description = "Database port number").default(3306)
+            val dbName by argParser.option(ArgType.String, description = "Database name").default("parse")
+            val dbUsername by argParser.option(ArgType.String, description = "Database user name").required()
+            val dbPassword by argParser.option(ArgType.String, description = "Database user password").required()
+            argParser.parse(args)
 
-fun insertDependencies(nodes: List<Node>) {
-    transaction {
-        addLogger(StdOutSqlLogger)
-        nodes.forEach { node ->
-            val dependentArtifactId =
-                Jar.select { (Jar.groupId eq node.groupId) and (Jar.artifactId eq node.artifactId) and (Jar.version eq node.version) }
-                    .single()[Jar.id]
-            node.childNodes.forEach { dependentNode ->
-                val dependedArtifactId =
-                    Jar.select {
-                        (Jar.groupId eq dependentNode.groupId) and
-                                (Jar.artifactId eq dependentNode.artifactId) and
-                                (Jar.version eq dependentNode.version)
-                    }.single()[Jar.id]
-                JarDependency.insert {
-                    it[dependId] = dependentArtifactId
-                    it[dependedId] = dependedArtifactId
+            Database.connect(
+                "jdbc:mysql://$dbHost:$dbPort/$dbName",
+                driver = "com.mysql.cj.jdbc.Driver",
+                user = dbUsername,
+                password = dbPassword
+            )
+            transaction {
+                addLogger(Slf4jSqlDebugLogger)
+                if (Jar.exists().not()) {
+                    SchemaUtils.create(Jar)
+                    logger.info("Created jars table")
+                }
+                if (JarClass.exists().not()) {
+                    SchemaUtils.create(JarClass)
+                    logger.info("Created jar_classes table")
+                }
+                if (JarMethod.exists().not()) {
+                    SchemaUtils.create(JarMethod)
+                    logger.info("Created jar_methods table")
+                }
+                if (JarDependency.exists().not()) {
+                    SchemaUtils.create(JarDependency)
+                    logger.info("Created jar_dependencies table")
                 }
             }
-        }
-    }
 
-    nodes.forEach { insertDependencies(it.childNodes) }
-}
+            val outputDir = createTempDirectory(prefix = "dependencies_jar")
+            val treePath = createTempFile(prefix = "dependencies", suffix = "txt")
+            val mavenXpp3Reader = MavenXpp3Reader()
+            val pomModel = mavenXpp3Reader.read(FileReader(pomPath))
+            logger.info("Download jar files to $outputDir...")
+            outputDir.createDirectories()
+            val processBuilder = ProcessBuilder()
+            try {
+                val copyDependenciesCommand =
+                    "mvn dependency:copy-dependencies -DoutputDirectory=${outputDir.absolutePathString()} -f $pomPath"
+                val exitValueCopyDependencies = processBuilder.command(
+                    copyDependenciesCommand.split(
+                        " "
+                    )
+                )
+                    .redirectOutput(INHERIT)
+                    .redirectError(INHERIT)
+                    .start()
+                    .waitFor()
+                if (exitValueCopyDependencies != 0) throw IOException("Failed to execute command $copyDependenciesCommand")
+                logger.info("Downloaded jar files")
+                logger.info("Generate dependency tree...")
+                val treeCommand =
+                    "mvn dependency:tree -DoutputFile=${treePath.absolutePathString()} -DoutputType=text -f $pomPath"
+                logger.debug("execute tree command: $treeCommand")
+                val exitValueTree = processBuilder.command(
+                    treeCommand.split(
+                        " "
+                    )
+                )
+                    .redirectOutput(INHERIT)
+                    .redirectError(INHERIT)
+                    .start()
+                    .waitFor()
+                if (exitValueTree != 0) throw IOException("Failed to execute command $treeCommand")
+                logger.info("Generated dependency tree")
+            } catch (e: IOException) {
+                logger.error("Error happened\n${e.message}")
+                exitProcess(1)
+            }
 
-fun main(args: Array<String>) {
-    val argParser = ArgParser("AnalyJar")
-    val pomPath by argParser.argument(ArgType.String, description = "Pom file path")
-    val dbHost by argParser.option(ArgType.String, description = "Database host address").default("localhost")
-    val dbPort by argParser.option(ArgType.Int, description = "Database port number").default(3306)
-    val dbName by argParser.option(ArgType.String, description = "Database name").default("parse")
-    val dbUsername by argParser.option(ArgType.String, description = "Database user name").required()
-    val dbPassword by argParser.option(ArgType.String, description = "Database user password").required()
-    argParser.parse(args)
+            logger.info("Parse dependency tree...")
+            val inputType = InputType.TEXT
+            val dependentTreeParser = inputType.newParser()
+            val tree = dependentTreeParser.parse(treePath.inputStream().reader().buffered()) ?: run {
+                logger.error("Failed to parse $treePath")
+                exitProcess(1)
+            }
+            logger.info("Parsed dependency tree")
 
-    Database.connect(
-        "jdbc:mysql://$dbHost:$dbPort/$dbName",
-        driver = "com.mysql.cj.jdbc.Driver",
-        user = dbUsername,
-        password = dbPassword
-    )
-    transaction {
-        addLogger(StdOutSqlLogger)
-        if (Jar.exists().not()) {
-            SchemaUtils.create(Jar)
-        }
-        if (JarClass.exists().not()) {
-            SchemaUtils.create(JarClass)
-        }
-        if (JarMethod.exists().not()) {
-            SchemaUtils.create(JarMethod)
-        }
-        if (JarDependency.exists().not()) {
-            SchemaUtils.create(JarDependency)
-        }
-    }
+            logger.info("Analyze jar files...")
+            val jars = outputDir.listDirectoryEntries("*.jar")
+            logger.debug("jar list: ${jars.map { "$it, " }}")
+            val urlClassLoader = URLClassLoader.newInstance(jars.map { it.toUri().toURL() }.toList().toTypedArray())
+            jars.forEach { file ->
+                transaction {
+                    addLogger(Slf4jSqlDebugLogger)
 
-    val outputDir = createTempDirectory(prefix = "dependencies_jar")
-    val treePath = createTempFile(prefix = "dependencies", suffix = "txt")
-    val mavenXpp3Reader = MavenXpp3Reader()
-    val pomModel = mavenXpp3Reader.read(FileReader(pomPath))
-    println("Download jar files to $outputDir...")
-    outputDir.createDirectories()
-    val processBuilder = ProcessBuilder()
-    try {
-        val copyDependenciesCommand =
-            "mvn dependency:copy-dependencies -DoutputDirectory=${outputDir.absolutePathString()} -f $pomPath"
-        val exitValueCopyDependencies = processBuilder.command(
-            copyDependenciesCommand.split(
-                " "
-            )
-        )
-            .redirectOutput(INHERIT)
-            .redirectError(INHERIT)
-            .start()
-            .waitFor()
-        if (exitValueCopyDependencies != 0) throw IOException("Failed to execute command $copyDependenciesCommand")
-        println("Generate dependencies tree")
-        val treeCommand =
-            "mvn dependency:tree -DoutputFile=${treePath.absolutePathString()} -DoutputType=text -f $pomPath"
-        val exitValueTree = processBuilder.command(
-            treeCommand.split(
-                " "
-            )
-        )
-            .redirectOutput(INHERIT)
-            .redirectError(INHERIT)
-            .start()
-            .waitFor()
-        if (exitValueTree != 0) throw IOException("Failed to execute command $treeCommand")
-    } catch (e: IOException) {
-        println("Error happened\n${e.message}")
-        exitProcess(1)
-    }
+                    val dependenceJar =
+                        pomModel.dependencies.find { "${it.artifactId}-${it.version}.jar" == file.fileName.toString() }
+                            ?: run {
+                                logger.debug("========== FIND DEPENDENCY TREE =============")
+                                getArtifactInformation(tree.childNodes, file.fileName.toString()) ?: run {
+                                    logger.error("Dependence jar file ${file.fileName} information not found.")
+                                    exitProcess(1)
+                                }
+                            }
+                    val jarId = Jar.insert { jar ->
+                        jar[groupId] =
+                            dependenceJar.groupId
+                        jar[artifactId] = dependenceJar.artifactId
+                        jar[fileName] = file.fileName.toString()
+                        jar[version] = dependenceJar.version
+                    } get Jar.id
+                    val jar = JarFile(file.toFile())
+                    val url = file.toUri().toURL()
+                    logger.debug("===== $url =====")
 
-    val inputType = InputType.TEXT
-    val dependentTreeParser = inputType.newParser()
-    val tree = dependentTreeParser.parse(treePath.inputStream().reader().buffered()) ?: run {
-        println("Failed to parse $treePath")
-        exitProcess(1)
-    }
-
-    val jars = outputDir.listDirectoryEntries("*.jar")
-    val urlClassLoader = URLClassLoader.newInstance(jars.map { it.toUri().toURL() }.toList().toTypedArray())
-    jars.forEach { file ->
-        transaction {
-            addLogger(StdOutSqlLogger)
-
-            val dependenceJar =
-                pomModel.dependencies.find { "${it.artifactId}-${it.version}.jar" == file.fileName.toString() }
-                    ?: run {
-                        println("========== FIND DEPENDENCY TREE =============")
-                        getArtifactInformation(tree.childNodes, file.fileName.toString()) ?: run {
-                            println("Dependence jar file ${file.fileName} information not found.")
-                            exitProcess(1)
-                        }
-                    }
-            val jarId = Jar.insert { jar ->
-                jar[groupId] =
-                    dependenceJar.groupId
-                jar[artifactId] = dependenceJar.artifactId
-                jar[fileName] = file.fileName.toString()
-                jar[version] = dependenceJar.version
-            } get Jar.id
-            val jar = JarFile(file.toFile())
-            val url = file.toUri().toURL()
-            println("===== $url =====")
-
-            jar.entries().asSequence().filter { it.isDirectory.not() && it.name.endsWith(".class") }
-                .forEach { entry ->
-                    val className = entry.name.substring(0, entry.name.length - 6).replace('/', '.')
-                    try {
-                        val clazz = urlClassLoader.loadClass(className)
-                        println(clazz.name)
-                        val classId = JarClass.insert { jarClass ->
-                            jarClass[name] = clazz.name
-                            jarClass[this.jarId] = jarId
-                        } get JarClass.id
-                        clazz.methods.forEach {
-                            println("Method: ${it.name}")
-                            JarMethod.insert { jarMethod ->
-                                jarMethod[name] = it.name
-                                jarMethod[modifiers] = Modifier.toString(it.modifiers)
-                                jarMethod[this.classId] = classId
-                                jarMethod[returnTypeName] = it.returnType.name
-                                jarMethod[parameters] =
-                                    it.parameterTypes.map { parameter -> "${parameter.typeName} ${parameter.name}" }
-                                        .joinToString(", ")
+                    jar.entries().asSequence().filter { it.isDirectory.not() && it.name.endsWith(".class") }
+                        .forEach { entry ->
+                            val className = entry.name.substring(0, entry.name.length - 6).replace('/', '.')
+                            try {
+                                val clazz = urlClassLoader.loadClass(className)
+                                logger.debug("class name: ${clazz.name}")
+                                val classId = JarClass.insert { jarClass ->
+                                    jarClass[name] = clazz.name
+                                    jarClass[this.jarId] = jarId
+                                } get JarClass.id
+                                clazz.methods.forEach {
+                                    logger.debug("Method: ${it.name}")
+                                    JarMethod.insert { jarMethod ->
+                                        jarMethod[name] = it.name
+                                        jarMethod[modifiers] = Modifier.toString(it.modifiers)
+                                        jarMethod[this.classId] = classId
+                                        jarMethod[returnTypeName] = it.returnType.name
+                                        jarMethod[parameters] =
+                                            it.parameterTypes.map { parameter -> "${parameter.typeName} ${parameter.name}" }
+                                                .joinToString(", ")
+                                    }
+                                }
+                            } catch (e: Error) {
+                                logger.error("${e.javaClass.name} : ${e.message}")
+                            } catch (e: Exception) {
+                                logger.error("${e.javaClass.name} : ${e.message}")
                             }
                         }
-                    } catch (e: Error) {
-                        System.err.println("${e.javaClass.name} : ${e.message}")
-                    } catch (e: Exception) {
-                        System.err.println("${e.javaClass.name} : ${e.message}")
+                }
+            }
+            logger.info("Analyzed jar files")
+
+            logger.info("Analyze dependencies...")
+            insertDependencies(tree.childNodes)
+            logger.info("Analyzed dependencies...")
+        }
+
+        fun findNodeFromFileName(nodes: List<Node>, fileName: String): Node? {
+            return nodes.find { "${it.artifactId}-${it.version}.jar" == fileName } ?: run {
+                val childNodes = nodes.map {
+                    logger.debug("${it.artifactId} -> ${it.childNodes}")
+                    it.childNodes
+                }.flatten()
+                logger.debug(childNodes.map { "$it, " }.toString())
+                if (childNodes.isEmpty()) return null
+                return findNodeFromFileName(childNodes, fileName)
+            }
+        }
+
+        fun getArtifactInformation(nodes: List<Node>, fileName: String): Dependency? {
+            val node = findNodeFromFileName(nodes, fileName)
+            if (node != null) {
+                val dependency = Dependency()
+                dependency.groupId = node.groupId
+                dependency.artifactId = node.artifactId
+                dependency.version = node.version
+                return dependency
+            }
+            return null
+        }
+
+        fun insertDependencies(nodes: List<Node>) {
+            transaction {
+                addLogger(Slf4jSqlDebugLogger)
+                nodes.forEach { node ->
+                    val dependentArtifactId =
+                        Jar.select { (Jar.groupId eq node.groupId) and (Jar.artifactId eq node.artifactId) and (Jar.version eq node.version) }
+                            .single()[Jar.id]
+                    node.childNodes.forEach { dependentNode ->
+                        val dependedArtifactId =
+                            Jar.select {
+                                (Jar.groupId eq dependentNode.groupId) and
+                                        (Jar.artifactId eq dependentNode.artifactId) and
+                                        (Jar.version eq dependentNode.version)
+                            }.single()[Jar.id]
+                        JarDependency.insert {
+                            it[dependId] = dependentArtifactId
+                            it[dependedId] = dependedArtifactId
+                        }
                     }
                 }
+            }
+
+            nodes.forEach { insertDependencies(it.childNodes) }
         }
     }
-
-    insertDependencies(tree.childNodes)
 }

@@ -117,12 +117,14 @@
     <orderEntry type="library" name="Maven: org.jetbrains.exposed:exposed-core:0.34.1" level="project" />
     <orderEntry type="library" name="Maven: org.jetbrains.kotlin:kotlin-reflect:1.5.21" level="project" />
     <orderEntry type="library" name="Maven: org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.5.1" level="project" />
-    <orderEntry type="library" name="Maven: org.slf4j:slf4j-api:1.7.25" level="project" />
     <orderEntry type="library" name="Maven: org.jetbrains.exposed:exposed-dao:0.34.1" level="project" />
     <orderEntry type="library" name="Maven: org.jetbrains.exposed:exposed-jdbc:0.34.1" level="project" />
     <orderEntry type="library" name="Maven: mysql:mysql-connector-java:8.0.27" level="project" />
     <orderEntry type="library" name="Maven: com.google.protobuf:protobuf-java:3.11.4" level="project" />
     <orderEntry type="library" name="Maven: org.whitesource:maven-dependency-tree-parser:1.0.6" level="project" />
     <orderEntry type="library" name="Maven: commons-lang:commons-lang:2.4" level="project" />
+    <orderEntry type="library" name="Maven: org.slf4j:slf4j-api:1.7.32" level="project" />
+    <orderEntry type="library" name="Maven: ch.qos.logback:logback-classic:1.2.6" level="project" />
+    <orderEntry type="library" name="Maven: ch.qos.logback:logback-core:1.2.6" level="project" />
   </component>
 </module>
