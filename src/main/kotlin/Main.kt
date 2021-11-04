@@ -189,7 +189,7 @@ class Main {
             logger.info("Analyzed dependencies")
         }
 
-        fun findNodeFromFileName(nodes: List<Node>, fileName: String): Node? {
+        private fun findNodeFromFileName(nodes: List<Node>, fileName: String): Node? {
             return nodes.find { "${it.artifactId}-${it.version}.jar" == fileName } ?: run {
                 val childNodes = nodes.map {
                     logger.debug("${it.artifactId} -> ${it.childNodes}")
@@ -201,7 +201,7 @@ class Main {
             }
         }
 
-        fun getArtifactInformation(nodes: List<Node>, fileName: String): Dependency? {
+        private fun getArtifactInformation(nodes: List<Node>, fileName: String): Dependency? {
             val node = findNodeFromFileName(nodes, fileName)
             if (node != null) {
                 val dependency = Dependency()
@@ -213,7 +213,7 @@ class Main {
             return null
         }
 
-        fun insertDependencies(nodes: List<Node>) {
+        private fun insertDependencies(nodes: List<Node>) {
             transaction {
                 addLogger(Slf4jSqlDebugLogger)
                 nodes.forEach { node ->
