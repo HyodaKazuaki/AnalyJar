@@ -149,7 +149,7 @@ class Main {
                                 logger.debug("class name: ${clazz.name}")
                                 val classId = JarClass.insert { jarClass ->
                                     jarClass[package_name] = clazz.packageName
-                                    jarClass[name] = clazz.name
+                                    jarClass[name] = clazz.name.removePrefix("${clazz.packageName}.")
                                     jarClass[modifiers] = Modifier.toString(clazz.modifiers)
                                     jarClass[this.fileId] = fileId
                                 } get JarClass.id
@@ -186,7 +186,7 @@ class Main {
 
             logger.info("Analyze dependencies...")
             insertDependencies(tree.childNodes)
-            logger.info("Analyzed dependencies...")
+            logger.info("Analyzed dependencies")
         }
 
         fun findNodeFromFileName(nodes: List<Node>, fileName: String): Node? {
