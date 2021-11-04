@@ -8,5 +8,5 @@ object JarClass : Table("jar_classes") {
     val package_name = text("package")
     val name = text("name")
     val modifiers = text("modifiers")
-    val jarId = (integer("jar_id") references Jar.id)
+    val fileId = (integer("file_id") references File.id)
 }

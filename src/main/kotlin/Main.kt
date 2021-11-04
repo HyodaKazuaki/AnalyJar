@@ -1,7 +1,4 @@
-import entity.Jar
-import entity.JarClass
-import entity.JarDependency
-import entity.JarMethod
+import entity.*
 import fr.dutra.tools.maven.deptree.core.InputType
 import fr.dutra.tools.maven.deptree.core.Node
 import kotlinx.cli.ArgParser
@@ -119,6 +116,10 @@ class Main {
             jars.forEach { file ->
                 transaction {
                     addLogger(Slf4jSqlDebugLogger)
+                    val fileId = File.insert {
+                        it[name] = file.fileName.toString()
+                        it[path] = file.pathString
+                    } get File.id
 
                     val dependenceJar =
                         pomModel.dependencies.find { "${it.artifactId}-${it.version}.jar" == file.fileName.toString() }
@@ -129,13 +130,13 @@ class Main {
                                     exitProcess(1)
                                 }
                             }
-                    val jarId = Jar.insert { jar ->
+                    Jar.insert { jar ->
                         jar[groupId] =
                             dependenceJar.groupId
                         jar[artifactId] = dependenceJar.artifactId
-                        jar[fileName] = file.fileName.toString()
+                        jar[this.fileId] = fileId
                         jar[version] = dependenceJar.version
-                    } get Jar.id
+                    }
                     val jar = JarFile(file.toFile())
                     val url = file.toUri().toURL()
                     logger.debug("===== $url =====")
@@ -150,7 +151,7 @@ class Main {
                                     jarClass[package_name] = clazz.packageName
                                     jarClass[name] = clazz.name
                                     jarClass[modifiers] = Modifier.toString(clazz.modifiers)
-                                    jarClass[this.jarId] = jarId
+                                    jarClass[this.fileId] = fileId
                                 } get JarClass.id
                                 clazz.methods.forEach {
                                     logger.debug("Method: ${it.name}")
@@ -162,6 +163,15 @@ class Main {
                                         jarMethod[parameters] =
                                             it.parameterTypes.map { parameter -> "${parameter.typeName} ${parameter.name}" }
                                                 .joinToString(", ")
+                                    }
+                                }
+                                clazz.fields.forEach {
+                                    logger.debug("Field: ${it.name}")
+                                    JarField.insert { jarField ->
+                                        jarField[typeName] = it.type.name
+                                        jarField[name] = it.name
+                                        jarField[modifiers] = Modifier.toString(it.modifiers)
+                                        jarField[this.classId] = classId
                                     }
                                 }
                             } catch (e: Error) {

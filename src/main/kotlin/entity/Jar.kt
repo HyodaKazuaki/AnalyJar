@@ -7,6 +7,6 @@ object Jar : Table("jars") {
     override val primaryKey = PrimaryKey(id, name = "pk_jar_id")
     val groupId = text("group_id")
     val artifactId = text("artifact_id")
-    val fileName = text("file_name")
+    val fileId = (integer("file_id") references File.id)
     val version = text("version")
 }
