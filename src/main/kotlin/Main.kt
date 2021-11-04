@@ -147,7 +147,9 @@ class Main {
                                 val clazz = urlClassLoader.loadClass(className)
                                 logger.debug("class name: ${clazz.name}")
                                 val classId = JarClass.insert { jarClass ->
+                                    jarClass[package_name] = clazz.packageName
                                     jarClass[name] = clazz.name
+                                    jarClass[modifiers] = Modifier.toString(clazz.modifiers)
                                     jarClass[this.jarId] = jarId
                                 } get JarClass.id
                                 clazz.methods.forEach {
