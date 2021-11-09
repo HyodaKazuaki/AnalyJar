@@ -114,18 +114,21 @@ class Main {
             logger.debug("jar list: ${jars.map { "$it, " }}")
             val urlClassLoader = URLClassLoader.newInstance(jars.map { it.toUri().toURL() }.toList().toTypedArray())
             jars.forEach { file ->
+                val fileName = file.fileName.toString()
                 transaction {
                     addLogger(Slf4jSqlDebugLogger)
                     val fileId = File.insert {
-                        it[name] = file.fileName.toString()
-                        it[path] = file.fileName.toString()
+                        it[name] = fileName
+                        it[path] = fileName
                     } get File.id
 
                     val dependenceJar =
-                        pomModel.dependencies.find { "${it.artifactId}-${it.version}.jar" == file.fileName.toString() }
+                        pomModel.dependencies.find {
+                            "${it.artifactId}-${it.version}.jar" == fileName || "${it.artifactId}-${it.version}-${it.classifier}.jar" == fileName
+                        }
                             ?: run {
                                 logger.debug("========== FIND DEPENDENCY TREE =============")
-                                getArtifactInformation(tree.childNodes, file.fileName.toString()) ?: run {
+                                getArtifactInformation(tree.childNodes, fileName) ?: run {
                                     logger.error("Dependence jar file ${file.fileName} information not found.")
                                     exitProcess(1)
                                 }
@@ -190,13 +193,19 @@ class Main {
         }
 
         private fun findNodeFromFileName(nodes: List<Node>, fileName: String): Node? {
-            return nodes.find { "${it.artifactId}-${it.version}.jar" == fileName } ?: run {
+            logger.debug("Find file name $fileName from nodes ${nodes.map { "${it.artifactId}-${it.version}.jar" }}")
+            return nodes.find {
+                "${it.artifactId}-${it.version}.jar" == fileName || "${it.artifactId}-${it.version}-${it.classifier}.jar" == fileName
+            } ?: run {
                 val childNodes = nodes.map {
-                    logger.debug("${it.artifactId} -> ${it.childNodes}")
+                    logger.debug("${it.artifactId} -> ${it.childNodes.map { "${it.artifactId}, " }}")
                     it.childNodes
                 }.flatten()
-                logger.debug(childNodes.map { "$it, " }.toString())
-                if (childNodes.isEmpty()) return null
+                logger.debug("Child nodes: ${childNodes.map { "${it.artifactId}, " }}")
+                if (childNodes.isEmpty()) {
+                    logger.warn("Child nodes are empty")
+                    return null
+                }
                 return findNodeFromFileName(childNodes, fileName)
             }
         }
