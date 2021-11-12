@@ -115,24 +115,28 @@ class Main {
             val urlClassLoader = URLClassLoader.newInstance(jars.map { it.toUri().toURL() }.toList().toTypedArray())
             jars.forEach { file ->
                 val fileName = file.fileName.toString()
-                transaction {
+                val fileId = transaction {
                     addLogger(Slf4jSqlDebugLogger)
-                    val fileId = File.insert {
+                    File.insert {
                         it[name] = fileName
                         it[path] = fileName
                     } get File.id
+                }
 
-                    val dependenceJar =
-                        pomModel.dependencies.find {
-                            "${it.artifactId}-${it.version}.jar" == fileName || "${it.artifactId}-${it.version}-${it.classifier}.jar" == fileName
-                        }
-                            ?: run {
-                                logger.debug("========== FIND DEPENDENCY TREE =============")
-                                getArtifactInformation(tree.childNodes, fileName) ?: run {
-                                    logger.error("Dependence jar file ${file.fileName} information not found.")
-                                    exitProcess(1)
-                                }
+                val dependenceJar =
+                    pomModel.dependencies.find {
+                        "${it.artifactId}-${it.version}.jar" == fileName || "${it.artifactId}-${it.version}-${it.classifier}.jar" == fileName
+                    }
+                        ?: run {
+                            logger.debug("========== FIND DEPENDENCY TREE =============")
+                            getArtifactInformation(tree.childNodes, fileName) ?: run {
+                                logger.error("Dependence jar file ${file.fileName} information not found.")
+                                exitProcess(1)
                             }
+                        }
+
+                transaction {
+                    addLogger(Slf4jSqlDebugLogger)
                     Jar.insert { jar ->
                         jar[groupId] =
                             dependenceJar.groupId
@@ -140,24 +144,30 @@ class Main {
                         jar[this.fileId] = fileId
                         jar[version] = dependenceJar.version
                     }
-                    val jar = JarFile(file.toFile())
-                    val url = file.toUri().toURL()
-                    logger.debug("===== $url =====")
+                }
+                val jar = JarFile(file.toFile())
+                val url = file.toUri().toURL()
+                logger.debug("===== $url =====")
 
-                    jar.entries().asSequence().filter { it.isDirectory.not() && it.name.endsWith(".class") }
-                        .forEach { entry ->
-                            val className = entry.name.substring(0, entry.name.length - 6).replace('/', '.')
-                            try {
-                                val clazz = urlClassLoader.loadClass(className)
-                                logger.debug("class name: ${clazz.name}")
-                                val classId = JarClass.insert { jarClass ->
+                jar.entries().asSequence().filter { it.isDirectory.not() && it.name.endsWith(".class") }
+                    .forEach { entry ->
+                        val className = entry.name.substring(0, entry.name.length - 6).replace('/', '.')
+                        try {
+                            val clazz = urlClassLoader.loadClass(className)
+                            logger.debug("class name: ${clazz.name}")
+                            val classId = transaction {
+                                addLogger(Slf4jSqlDebugLogger)
+                                JarClass.insert { jarClass ->
                                     jarClass[package_name] = clazz.packageName
                                     jarClass[name] = clazz.name.removePrefix("${clazz.packageName}.")
                                     jarClass[modifiers] = Modifier.toString(clazz.modifiers)
                                     jarClass[this.fileId] = fileId
                                 } get JarClass.id
-                                clazz.methods.forEach {
-                                    logger.debug("Method: ${it.name}")
+                            }
+                            clazz.methods.forEach {
+                                logger.debug("Method: ${it.name}")
+                                transaction {
+                                    addLogger(Slf4jSqlDebugLogger)
                                     JarMethod.insert { jarMethod ->
                                         jarMethod[name] = it.name
                                         jarMethod[modifiers] = Modifier.toString(it.modifiers)
@@ -168,8 +178,11 @@ class Main {
                                                 .joinToString(", ")
                                     }
                                 }
-                                clazz.fields.forEach {
-                                    logger.debug("Field: ${it.name}")
+                            }
+                            clazz.fields.forEach {
+                                logger.debug("Field: ${it.name}")
+                                transaction {
+                                    addLogger(Slf4jSqlDebugLogger)
                                     JarField.insert { jarField ->
                                         jarField[typeName] = it.type.name
                                         jarField[name] = it.name
@@ -177,13 +190,13 @@ class Main {
                                         jarField[this.classId] = classId
                                     }
                                 }
-                            } catch (e: Error) {
-                                logger.error("${e.javaClass.name} : ${e.message}")
-                            } catch (e: Exception) {
-                                logger.error("${e.javaClass.name} : ${e.message}")
                             }
+                        } catch (e: Error) {
+                            logger.error(e.stackTraceToString())
+                        } catch (e: Exception) {
+                            logger.error(e.stackTraceToString())
                         }
-                }
+                    }
             }
             logger.info("Analyzed jar files")
 
