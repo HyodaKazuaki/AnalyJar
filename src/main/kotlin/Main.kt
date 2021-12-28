@@ -155,19 +155,16 @@ class Main {
                         try {
                             val clazz = urlClassLoader.loadClass(className)
                             logger.debug("class name: ${clazz.name}")
-                            val classId = transaction {
+                            transaction {
                                 addLogger(Slf4jSqlDebugLogger)
-                                JarClass.insert { jarClass ->
+                                val classId = JarClass.insert { jarClass ->
                                     jarClass[package_name] = clazz.packageName
                                     jarClass[name] = clazz.name.removePrefix("${clazz.packageName}.")
                                     jarClass[modifiers] = Modifier.toString(clazz.modifiers)
                                     jarClass[this.fileId] = fileId
                                 } get JarClass.id
-                            }
-                            clazz.methods.forEach {
-                                logger.debug("Method: ${it.name}")
-                                transaction {
-                                    addLogger(Slf4jSqlDebugLogger)
+                                clazz.methods.forEach {
+                                    logger.debug("Method: ${it.name}")
                                     JarMethod.insert { jarMethod ->
                                         jarMethod[name] = it.name
                                         jarMethod[modifiers] = Modifier.toString(it.modifiers)
@@ -178,11 +175,8 @@ class Main {
                                                 .joinToString(", ")
                                     }
                                 }
-                            }
-                            clazz.fields.forEach {
-                                logger.debug("Field: ${it.name}")
-                                transaction {
-                                    addLogger(Slf4jSqlDebugLogger)
+                                clazz.fields.forEach {
+                                    logger.debug("Field: ${it.name}")
                                     JarField.insert { jarField ->
                                         jarField[typeName] = it.type.name
                                         jarField[name] = it.name
